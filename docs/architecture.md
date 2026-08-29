@@ -1,53 +1,77 @@
-# SatQuery AI - Architecture Documentation
+# SatQuery AI — Architecture Documentation
 
-## Overview
-**SatQuery AI** is an agentic vision-language assistant for multimodal remote-sensing image analysis. The system orchestrates multiple specialized models to answer questions, detect change over time, and fuse optical and Synthetic Aperture Radar (SAR) imagery.
+## 1. System Overview
 
----
-
-## Agent Flow & Routing Pipeline
-
-```
-Frontend (User Input: Image(s) + Query)
-   ↓
-FastAPI Backend (/api/v1/analyze)
-   ↓
-Input Validation (preprocessing/image_validator.py)
-   ↓
-Agent Router (agent/router.py & agent/task_classifier.py)
-   ↓
-Specialist Model Selection & Execution
-   ├── 1. Single Image → GeoChat-7B (models/geochat/)
-   ├── 2. Bi-temporal Pair → ChangeFormerV6 (models/changeformer/)
-   │                           ↓
-   │                      GeoChat-7B (Explain detected changes)
-   └── 3. Optical + SAR Pair → BIFOLD RDNet (models/bifold/)
-   ↓
-Result Integrator (agent/result_integrator.py)
-   ↓
-Unified Output: Answer + Evidence + Confidence + Execution Trace
-   ↓
-Frontend Client
-```
+**SatQuery AI** is a production-quality satellite image analysis platform. It provides an agentic vision-language assistant for multimodal remote-sensing image analysis, supporting:
+- Single-image satellite visual question answering (VQA) & scene captioning
+- Bi-temporal change detection & change-map generation
+- Optical + Synthetic Aperture Radar (SAR) multimodal fusion analysis
 
 ---
 
-## Specialist Models & Responsibilities
+## 2. Core Architecture & Data Flow
 
-| Model | Architecture | Primary Task | Input | Output |
-| :--- | :--- | :--- | :--- | :--- |
-| **GeoChat-7B** | LLaVA-based LVLM | Single-image VQA, scene captioning, spatial grounding | 1 Optical Image + Query | Text answer, bounding boxes |
-| **ChangeFormerV6** | Siamese Transformer | Bi-temporal change detection | Image $T_1$ & Image $T_2$ | Change map, change ratio, bounding boxes |
-| **BIFOLD RDNet** | Dual-Branch Fusion Net | Co-registered Optical + SAR analysis | Optical Image + SAR Image | Fused targets, penetration evidence |
+```
+                      React / TypeScript Frontend
+                                  │ (Multipart Upload + Query)
+                                  ▼
+                            FastAPI Backend
+                                  │
+                                  ▼
+                          Analysis Service
+                                  │
+                                  ▼
+                           Image Validator
+                        (Format, Bounds, Decode)
+                                  │
+                                  ▼
+                           AI Agent Router
+                                  │ (Query & Input Inspection)
+                                  ▼
+                            Model Registry
+                       (Capability-based lookup)
+                                  │
+                ┌─────────────────┼─────────────────┐
+                ▼                 ▼                 ▼
+          GeoChatAdapter   ChangeFormerAdapter  BifoldAdapter
+          (SINGLE_IMAGE)   (CHANGE_DETECTION)   (OPTICAL_SAR)
+                │                 │                 │
+           GeoChat-7B       ChangeFormerV6     BIFOLD RDNet
+                │                 │                 │
+                └─────────────────┼─────────────────┘
+                                  ▼
+                          Evidence Generator
+                      (Overlays, BBoxes, Masks)
+                                  │
+                                  ▼
+                      Structured AnalysisResult
+                                  │
+                                  ▼
+                            FastAPI Return
+                                  │
+                                  ▼
+                             Frontend UI
+```
 
 ---
 
-## Unified Model Interface
-To enforce modularity and allow independent deployment or replacement of any model, each model adheres to `BaseModelService`:
+## 3. Key Architectural Principles
 
-```python
-class BaseModelService(ABC):
-    @abstractmethod
-    def analyze(self, input_data: Dict[str, Any], query: Optional[str] = None) -> Dict[str, Any]:
-        pass
-```
+1. **Strict Model Decoupling (`BaseModelAdapter`)**:
+   - The router communicates **only** with model adapters via `analyze(analysis_input) -> AnalysisResult`.
+   - The router never imports model-specific deep learning frameworks or internal checkpoints.
+   - All models declare their capabilities (`ModelCapability.SINGLE_IMAGE_VQA`, `ModelCapability.CHANGE_DETECTION`, etc.).
+
+2. **Model Registry**:
+   - Manages available adapters by capability.
+   - New models or alternative backends can be registered at runtime without touching router code.
+
+3. **Explicit Mock Representation**:
+   - During local development or on CPU environments, mock adapters return responses marked with `"mock": true` and `"confidence": null`.
+   - Mock outputs are never presented as real model inferences.
+
+4. **Structured Evidence Pipeline**:
+   - Evidence items (bounding boxes, change ratios, radar penetration indicators, heatmaps) are structured as data objects independent of frontend visualization logic.
+
+5. **Storage Abstraction**:
+   - `StorageService` encapsulates local filesystem storage for development and can be swapped for S3/GCS/Azure Blob in cloud production deployments.
