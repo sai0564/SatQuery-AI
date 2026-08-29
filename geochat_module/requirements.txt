@@ -1,0 +1,10 @@
+torch==2.1.2
+torchvision==0.16.2
+transformers==4.35.2
+accelerate==0.24.1
+sentencepiece==0.1.99
+einops==0.6.1
+gradio==3.35.2
+gradio_client==0.2.7
+requests
+Pillow
